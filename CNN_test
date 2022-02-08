@@ -1,0 +1,144 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[2]:
+
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score
+from sklearn.metrics import confusion_matrix
+from keras.utils.np_utils import to_categorical
+from sklearn.utils import class_weight
+from sklearn.utils import resample
+
+#from tensorflow import keras
+#from keras.layers import Dense, Convolution1D, MaxPool1D, Flatten, Dropout
+#from keras.layers import Input
+#from keras.models import Model
+#from keras.layers import BatchNormalization
+#import keras
+#from keras.callbacks import EarlyStopping, ModelCheckpoint
+
+import warnings
+warnings.filterwarnings('ignore')
+
+
+
+
+import tensorflow as tf
+#print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+
+
+
+
+# In[4]:
+
+
+train = pd.read_csv('../Thesis/data/mit_bih/mitbih_train.csv', header=None)
+#X_train = train.iloc[:, :-1]
+#y_train = train.iloc[:, -1]
+
+test = pd.read_csv('../Thesis/data/mit_bih/mitbih_test.csv', header=None)
+#X_test = test.iloc[:, :-1]
+#y_test = test.iloc[:, -1]
+
+
+# In[5]:
+
+
+# balance data
+df_0 = train[train[187]==0].sample(n=70000, random_state=42)
+df_1 = train[train[187]==1]
+df_2 = train[train[187]==2]
+df_3 = train[train[187]==3]
+df_4 = train[train[187]==4]
+
+df_1_sampled = resample(df_1, n_samples=70000, random_state=42)
+df_2_sampled = resample(df_2, n_samples=70000, random_state=42)
+df_3_sampled = resample(df_3, n_samples=70000, random_state=42)
+df_4_sampled = resample(df_4, n_samples=70000, random_state=42)
+
+train_df = pd.concat([df_0, df_1_sampled, df_2_sampled, df_3_sampled, df_4_sampled])
+
+
+# In[6]:
+
+
+def add_gaussian_noise(signal):
+    noise=np.random.normal(0,0.5,186)
+    return (signal+noise)
+
+
+# In[7]:
+
+
+target_train=train_df[187]
+target_test=test[187]
+y_train=to_categorical(target_train)
+y_test=to_categorical(target_test)
+
+X_train=train_df.iloc[:,:186].values
+X_test=test.iloc[:,:186].values
+
+for i in range(len(X_train)):
+    X_train[i,:186]= add_gaussian_noise(X_train[i,:186])
+    
+X_train = X_train.reshape(len(X_train), X_train.shape[1],1)
+X_test = X_test.reshape(len(X_test), X_test.shape[1],1)
+
+
+# In[8]:
+
+
+def network(X_train,y_train,X_test,y_test):
+    
+
+    im_shape=(X_train.shape[1],1)
+    
+    inputs_cnn=tf.keras.layers.Input(shape=(im_shape), name='inputs_cnn')
+    conv1_1=tf.keras.layers.Convolution1D(64, (6), activation='relu', input_shape=im_shape)(inputs_cnn)
+    conv1_1=tf.keras.layers.BatchNormalization()(conv1_1)
+    pool1=tf.keras.layers.MaxPool1D(pool_size=(3), strides=(2), padding="same")(conv1_1)
+    
+    conv2_1=tf.keras.layers.Convolution1D(64, (3), activation='relu', input_shape=im_shape)(pool1)
+    conv2_1=tf.keras.layers.BatchNormalization()(conv2_1)
+    pool2=tf.keras.layers.MaxPool1D(pool_size=(2), strides=(2), padding="same")(conv2_1)
+    
+    conv3_1=tf.keras.layers.Convolution1D(64, (3), activation='relu', input_shape=im_shape)(pool2)
+    conv3_1=tf.keras.layers.BatchNormalization()(conv3_1)
+    pool3=tf.keras.layers.MaxPool1D(pool_size=(2), strides=(2), padding="same")(conv3_1)
+    
+    flatten=tf.keras.layers.Flatten()(pool3)
+    dense_end1 = tf.keras.layers.Dense(64, activation='relu')(flatten)
+    dense_end2 = tf.keras.layers.Dense(32, activation='relu')(dense_end1)
+    main_output = tf.keras.layers.Dense(5, activation='softmax', name='main_output')(dense_end2)
+    
+    
+    model = tf.keras.models.Model(inputs= inputs_cnn, outputs=main_output)
+    model.compile(optimizer='adam', loss='categorical_crossentropy',metrics = ['accuracy'])
+    
+    
+    callbacks = [tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=8),
+             tf.keras.callbacks.ModelCheckpoint(filepath='best_model.h5', monitor='val_loss', save_best_only=True)]
+
+    history=model.fit(X_train, y_train,epochs=10,callbacks=callbacks, batch_size=32,validation_data=(X_test,y_test))
+    model.load_weights('best_model.h5')
+    return(model,history)
+
+
+# In[4]:
+
+
+tf.debugging.set_log_device_placement(True)
+
+a = tf.constant(X_train)
+b = tf.constant(y_train)
+c = tf.constant(X_test)
+d = tf.constant(y_test)
+
+model,history=network(a,b,c,d)
